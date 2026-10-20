@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Real Body Fighter</title>
+<meta name="theme-color" content="#0b0b16"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230b0b16'/%3E%3Ccircle cx='32' cy='32' r='24' fill='%23ff3d6e'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%23f2f2fa'/%3E%3C/svg%3E">
+<style>
+:root{color-scheme:dark;--bg:#0b0b16;--pn:#1a1a30;--ac:#ff3d6e;--ac2:#35e0ff;--tx:#f2f2fa;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:16px system-ui,sans-serif;overflow:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+#v{position:fixed;right:8px;bottom:8px;width:84px;height:64px;object-fit:cover;border-radius:8px;opacity:.7;z-index:3;transform:scaleX(-1)}
+.hidden{display:none!important}
+#scr{position:fixed;inset:0;z-index:10;overflow:auto;padding:16px;background:rgba(8,8,20,.88);text-align:center}
+h1{color:var(--ac);margin:8px 0;letter-spacing:2px}h3{margin:14px 0 6px;color:var(--ac2)}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+button{background:var(--pn);color:var(--tx);border:2px solid #34345a;border-radius:14px;padding:14px 10px;font:inherit;font-weight:700;min-height:54px}
+button.on,button.go{background:var(--ac);border-color:var(--ac)}button:disabled{opacity:.35}button:active{transform:scale(.96)}
+small{display:block;font-weight:400;opacity:.7}
+label{display:flex;gap:12px;align-items:center;justify-content:center;margin:16px 0;font-size:18px}input[type=checkbox]{width:28px;height:28px}
+#hud{position:fixed;inset:0;z-index:5;pointer-events:none;padding:10px}#hud button{pointer-events:auto}
+.row{display:flex;gap:10px;justify-content:space-between;align-items:flex-start}
+.bars{width:42%}.bar{height:14px;background:#000a;border:2px solid #000;border-radius:8px;margin-bottom:4px;overflow:hidden}
+.bar i{display:block;height:100%;width:100%;background:#3f6;transition:width .1s}.bar.s i{background:#fc3}.bar.p i{background:var(--ac2)}.bar.e i{background:var(--ac)}
+#eb{width:36%;text-align:right;font-weight:700}.btns{display:flex;flex-direction:column;gap:6px}.btns button{padding:8px;min-height:44px}
+#info{position:absolute;top:30%;left:0;right:0;text-align:center;font-size:44px;font-weight:900;text-shadow:0 3px 0 #000}
+#warn{position:absolute;top:42%;left:0;right:0;text-align:center;font-size:90px;color:#f33;font-weight:900;text-shadow:0 0 20px #f00}
+#sim{position:absolute;bottom:12px;left:8px;display:flex;gap:8px;flex-wrap:wrap;max-width:75%}#sim button{width:68px;height:68px;font-size:12px;padding:4px}
+.pop{position:fixed;z-index:6;font-weight:900;font-size:26px;color:#ff0;text-shadow:0 2px 0 #000;pointer-events:none;animation:up .9s forwards}
+@keyframes up{to{transform:translateY(-70px);opacity:0}}
+</style></head><body>
+<canvas id="c"></canvas><video id="v" playsinline muted></video>
+<div id="hud" class="hidden">
+ <div class="row"><div class="bars"><div class="bar"><i id="bh"></i></div><div class="bar s"><i id="bs"></i></div><div class="bar p"><i id="bp"></i></div></div>
+ <div id="eb"><span id="en"></span><div class="bar e"><i id="be"></i></div></div>
+ <div class="btns"><button onclick="stopPlay()">■ Stop</button><button onclick="flipCam()">⟳ Cam</button><button id="bm" onclick="toggleMute()">🔊</button></div></div>
+ <div id="info" aria-live="polite"></div><div id="trk" style="position:absolute;left:10px;bottom:84px;font-size:13px;opacity:.8"></div><div id="warn" class="hidden">!</div>
+ <div id="sim"></div>
+</div>
+<div id="scr"></div>
+<script>addEventListener('error',e=>{let d=document.getElementById('errbox');if(!d){d=document.createElement('div');d.id='errbox';document.body.appendChild(d)}d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99;background:#600;color:#fff;font:12px system-ui;padding:8px';d.textContent='Error: '+e.message+' (line '+e.lineno+')'})</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>window.THREE||document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script>')</script>
+<script>
+'use strict';
+if(!window.THREE){document.body.insertAdjacentHTML('beforeend','<div style="position:fixed;inset:0;z-index:99;background:#0b0b16;padding:24px;text-align:center;color:#fff"><h2>Could not load the 3D engine</h2><p>Check your internet connection, then reload.</p><button onclick="location.reload()" style="padding:14px 24px;font-size:18px">Reload</button></div>');throw new Error('THREE missing')}
+const $=s=>document.querySelector(s),rnd=Math.random,clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+/* ---------- SAVE DATA ---------- */
+let S={xp:0,lv:1,coins:0,hero:0,cleared:0,streak:0,last:'',adapt:{},wins:0,tut:0,real:1,cust:{},face:'',es:{feint:0,counter:0,speed:0,rage:0},
+ stats:{Strength:1,Stamina:1,Agility:1,Speed:1,Power:1,Balance:1},sk:{power:0,dodge:0,regen:0,special:0,guard:0,heal:0,combo:0},ai:{jab:[0,0],hook:[0,0],combo:[0,0],heavy:[0,0]},own:[0],out:0};
+try{Object.assign(S,JSON.parse(localStorage.getItem('rbf')||'{}'))}catch(e){}
+const save=()=>{try{localStorage.setItem('rbf',JSON.stringify(S))}catch(e){}};
+
+/* ---------- DATA: add exercises / heroes / enemies / levels here ---------- */
+// kind: y = vertical body dip, e = energy bursts, p = punches
+const EX=[{n:'Squats',stat:'Strength',kind:'y'},{n:'Push-ups',stat:'Power',kind:'y'},
+ {n:'Jumping Jacks',stat:'Stamina',kind:'e'},{n:'High Knees',stat:'Speed',kind:'e'},{n:'Shadow Boxing',stat:'Agility',kind:'p'},{n:'Lunges',stat:'Balance',kind:'y'},{n:'Sit-ups',stat:'Strength',kind:'y'},{n:'Burpees',stat:'Stamina',kind:'y'},
+ {n:'Plank Hold',stat:'Balance',kind:'h'},{n:'Dodge Drill',stat:'Agility',kind:'d'},{n:'Kick Drill',stat:'Power',kind:'k'}];
+const HEROES=[{n:'Kaito',hair:0xffcc00,shirt:0xff5522,band:0xff2244,sp:'Flame Fist'},{n:'Ryu',hair:0x1a1a55,shirt:0x2255ff,band:0xffffff,sp:'Thunder Kick'},
+ {n:'Haru',hair:0xff7744,shirt:0xaa3322,band:0xffee00,sp:'Blaze Storm'},{n:'Goro',hair:0x33aa44,shirt:0x886622,band:0xff8800,sp:'Earth Smash'},{n:'Ren',hair:0xeeeeff,shirt:0x22bbcc,band:0x3355ff,sp:'Ice Burst'}];
+const ATK={jab:{w:.8,d:8,n:1,t:'JAB'},hook:{w:1,d:12,n:1,t:'HOOK'},combo:{w:.7,d:6,n:3,t:'COMBO'},heavy:{w:1.3,d:20,n:1,t:'HEAVY'}};
+const ENEMIES=[{n:'Street Thug',hp:60,spd:1,pow:1,aura:0xff8800,weak:'Block, then counter',build:()=>human({skin:0xf1c27d,shirt:0x444444,hair:0x111111,band:0xcc0000})},
+ {n:'Shadow Wolf',hp:55,spd:1.35,pow:.9,aura:0x66aaff,weak:'Slow to recover',build:wolf},
+ {n:'Oni Demon',hp:110,spd:.9,pow:1.5,aura:0xff0044,weak:'Dodge the heavy strike',build:oni},
+ {n:'Blaze Tiger',hp:80,spd:1.5,pow:1.2,aura:0xff6600,weak:'Dodge, then punch while it recovers',build:()=>tint(wolf(),0xe08a1e)},
+ {n:'Iron Gorilla',hp:130,spd:.8,pow:1.8,aura:0x88ff44,weak:'Fast hits while it winds up',build:()=>tint(oni(),0x3a3a4a)}];
+// Recolor body and head of a model so one builder can make several enemies.
+function tint(r,c){r.traverse(m=>{const p=m.geometry&&m.geometry.parameters;if(p&&m.material.isMeshToonMaterial&&(p.radius>.3||p.width>.6))m.material.color.set(c)});return r}
+const LEVELS=[{n:'Street Alley',e:0,s:1,bg:0x2a2a44,a:'street'},{n:'Jungle Edge',e:1,s:1,bg:0x143a1c,a:'jungle'},{n:'Dojo Entrance',e:0,s:1.4,bg:0x3a2222,a:'dojo'},
+ {n:'Deep Jungle',e:1,s:1.5,bg:0x0f3318,a:'jungle'},{n:'BOSS: Oni Lord',e:2,s:1.2,bg:0x3a1030,boss:1,a:'hell'},
+ {n:'Jungle Path',e:3,s:1.5,bg:0x1d3a22,a:'jungle'},{n:'Jungle Ruins',e:4,s:1.4,bg:0x24402a,a:'jungle'},{n:'Rooftop Dash',e:3,s:1.8,bg:0x2a3350,a:'street'},{n:'City Neon',e:4,s:1.8,bg:0x301a4a,a:'street'},{n:'BOSS: Gorilla King',e:4,s:2.2,bg:0x401820,boss:1,a:'hell'}];
+// 30 levels = 6 worlds x 5 (boss every 5th). Edit WORLDS or ENEMIES to change them.
+const WORLDS=[['Street','street',0x2a2a44],['Dojo','dojo',0x3a2222],['Jungle','jungle',0x143a1c],['City Rooftop','roof',0x2a3350],['Arena','arena',0x2a2a2a],['Final Tower','tower',0x301048]];
+LEVELS.length=0;WORLDS.forEach((w,wi)=>{for(let k=0;k<5;k++){const boss=k==4,e=boss?[2,3,4,1,2,2][wi]:wi==2?[1,3,4,1][k]:[0,3,4,1,0][(k+wi)%5];LEVELS.push({n:(boss?'BOSS: ':'')+w[0]+' '+(k+1),e,s:1+.12*(wi*5+k)+(boss?.3:0),bg:w[2],a:w[1],boss:boss?1:0})}});
+const OUTFITS=[{n:'Default',c:0,o:{}},{n:'Crimson Gi',c:60,o:{shirt:0xcc1122,band:0xffffff}},{n:'Cyber Suit',c:120,o:{shirt:0x112233,band:0x35e0ff}},{n:'Gold Master',c:250,o:{shirt:0xe0b020,band:0xff3d6e}}];
+const TITLES=['Beginner','Apprentice','Fighter','Warrior','Master','Legend'];  // rank goes up every 5 wins
+
+/* ---------- INPUT BUS: camera, buttons and keyboard all emit the same events ---------- */
+const Bus={h:{},on(t,f){(this.h[t]??=[]).push(f)},emit(t,d){(this.h[t]||[]).forEach(f=>f(d))}};
+const KEYS={' ':'punch',z:'punch',x:'kick',a:'dodge',s:'block',r:'rep',e:'special'};
+addEventListener('keydown',e=>{const k=KEYS[e.key.toLowerCase()];if(k)Bus.emit(k)});
+$('#sim').innerHTML=[['punch','👊 Punch'],['kick','🦵 Kick'],['dodge','💨 Dodge'],['block','🛡 Block'],['rep','✔ Rep'],['special','⚡ Special']].map(([e,t])=>`<button onclick="Bus.emit('${e}')">${t}</button>`).join('');
+/* ---------- AUDIO ---------- */
+let AC,mute=0;
+function beep(f=440,d=.08,ty='square',v=.05){if(mute)return;try{AC??=new AudioContext();const o=AC.createOscillator(),g=AC.createGain();o.type=ty;o.frequency.value=f;g.gain.value=v;o.connect(g);g.connect(AC.destination);o.start();g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+d);o.stop(AC.currentTime+d)}catch(e){}}
+function toggleMute(){mute^=1;$('#bm').textContent=mute?'🔇':'🔊'}
+const LEAD=[392,440,523,440,392,330,392,294],BASS=[98,98,131,98];let mi=0,camK=0;
+function noise(d,v,fq){if(mute)return;try{AC??=new AudioContext();const n=AC.sampleRate*d|0,b=AC.createBuffer(1,n,AC.sampleRate),a=b.getChannelData(0);for(let i=0;i<n;i++)a[i]=(rnd()*2-1)*(1-i/n);const s=AC.createBufferSource(),f=AC.createBiquadFilter(),g=AC.createGain();s.buffer=b;f.type='bandpass';f.frequency.value=fq;g.gain.value=v;s.connect(f);f.connect(g);g.connect(AC.destination);s.start()}catch(e){}}
+// Sound effects: whoosh, kick, hit, hurt, dodge, special, warn, win, lose, level
+function sfx(k){const arp=(a,w,t,v)=>a.forEach((f,i)=>setTimeout(()=>beep(f,w,t,v),i*140));({whoosh:()=>noise(.18,.5,1800),kick:()=>noise(.25,.6,900),hit:()=>{noise(.15,.7,400);beep(120,.15,'sine',.12)},hurt:()=>{noise(.25,.8,250);beep(80,.3,'sawtooth',.1)},dodge:()=>{beep(900,.06,'sine',.08);beep(1400,.1,'sine',.08)},special:()=>{noise(.6,.7,600);beep(220,.5,'sawtooth',.08);beep(660,.5,'square',.05)},warn:()=>beep(1000,.12,'square',.07),win:()=>arp([523,659,784,1047],.25,'triangle',.1),lose:()=>arp([330,262,196,131],.3,'sawtooth',.08),level:()=>arp([523,784,1047],.2,'triangle',.1)}[k]||(()=>{}))()}
+function favAtk(){return Object.keys(S.ai).reduce((b,x)=>(S.ai[x][0]+1)/(S.ai[x][1]+2)>(S.ai[b][0]+1)/(S.ai[b][1]+2)?x:b,'jab').toUpperCase()}
+setInterval(()=>{if(G.mode=='hub'||G.paused||G.mode=='ko')return;beep(LEAD[mi%8],.2,'triangle',.02);if(mi%2==0)beep(BASS[mi/2%4|0],.3,'sine',.05);if(G.mode=='fight'&&mi%2==1)noise(.05,.15,6000);mi++},260);
+
+/* ---------- THREE.JS: cel-shaded look (toon material + black back-face outline) ---------- */
+const R=new THREE.WebGLRenderer({canvas:$('#c'),antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));
+const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(50,1,.1,100);
+sc.add(new THREE.HemisphereLight(0xffffff,0x444466,.9));const dl=new THREE.DirectionalLight(0xffffff,.8);dl.position.set(3,6,5);sc.add(dl);
+const GM=new THREE.DataTexture(new Uint8Array([90,90,90,255,170,170,170,255,255,255,255,255]),3,1,THREE.RGBAFormat);GM.needsUpdate=true;
+const OUT=new THREE.MeshBasicMaterial({color:0,side:THREE.BackSide});
+const toon=c=>new THREE.MeshToonMaterial({color:c,gradientMap:GM});
+let REAL=0;  // 1 while building the realistic character: standard lit materials, no outlines
+function part(g,c,x,y,z,p){const m=new THREE.Mesh(g,REAL?new THREE.MeshStandardMaterial({color:c,roughness:.7,metalness:.05}):toon(c));m.position.set(x,y,z);if(!REAL){const o=new THREE.Mesh(g,OUT);o.scale.setScalar(1.08);m.add(o)}p&&p.add(m);return m}
+const G3=THREE;
+function limb(r,x,y,c,len){const p=new THREE.Group();p.position.set(x,y,0);r.add(p);part(new G3.CylinderGeometry(.11,.1,len,8),c,0,-len/2,0,p);return p}
+// Humanoid built facing +z. Used for hero and human enemies.
+function human(o){const r=new THREE.Group(),u=r.userData;
+ part(new G3.CylinderGeometry(.35,.3,.9,12),o.shirt,0,1.3,0,r);
+ const h=part(new G3.SphereGeometry(.4,16,12),o.skin||0xf1c27d,0,2.1,0,r);u.head=h;
+ for(const s of[-1,1]){part(new G3.SphereGeometry(.12,8,8),0xffffff,s*.15,.02,.33,h).scale.set(1,1.4,.5);part(new G3.SphereGeometry(.06,8,8),0x112,s*.15,.02,.38,h)}
+ for(let i=0;i<6;i++){const a=i/6*Math.PI*2,c=part(new G3.ConeGeometry(.16,.5,6),o.hair,Math.cos(a)*.25,.32,Math.sin(a)*.25-.05,h);c.rotation.set(Math.sin(a)*.6,0,-Math.cos(a)*.6)}
+ if(o.face){const f=new THREE.Mesh(new G3.CircleGeometry(.34,24),new THREE.MeshBasicMaterial({map:new THREE.TextureLoader().load(o.face)}));f.position.set(0,-.02,.41);h.add(f)}  // face photo
+ part(new G3.ConeGeometry(.2,.6,6),o.hair,0,.5,.05,h);
+ part(new G3.TorusGeometry(.4,.05,6,16),o.band,0,.1,0,h).rotation.x=Math.PI/2;
+ u.tails=[-1,1].map(s=>{const t=new THREE.Group();t.position.set(s*.1,.1,-.4);h.add(t);part(new G3.BoxGeometry(.1,.04,.7),o.band,0,0,-.35,t);return t});
+ u.aL=limb(r,-.45,1.65,o.skin||0xf1c27d,.8);u.aR=limb(r,.45,1.65,o.skin||0xf1c27d,.8);
+ u.lL=limb(r,-.17,.85,0x223,.85);u.lR=limb(r,.17,.85,0x223,.85);
+ for(const a of[u.aL,u.aR])part(new G3.SphereGeometry(.17,8,8),0xffffff,0,-.8,0,a);
+ return r}
+// Realistic 3D character: smooth lit body with neck, ears, nose, eyes, sleeves, hands and shoes. Same animation slots as human().
+function realHuman(o){REAL=1;const r=new THREE.Group(),u=r.userData,sk=o.skin||0xe0ac84,P=part,S_=(a,b,c)=>new G3.SphereGeometry(a,b||20,c||14),Cy=(a,b,l,n)=>new G3.CylinderGeometry(a,b,l,n||16);
+ P(Cy(.36,.27,.85,24),o.shirt,0,1.3,0,r);P(S_(.2),0x223344,0,.88,0,r).scale.set(1.6,1,1);
+ P(S_(.17),o.shirt,-.43,1.62,0,r);P(S_(.17),o.shirt,.43,1.62,0,r);P(Cy(.09,.1,.22,12),sk,0,1.82,0,r);
+ const h=P(S_(.3,28,20),sk,0,2.12,0,r);h.scale.set(.9,1.12,1);u.head=h;
+ for(const s of[-1,1]){P(S_(.07,10,8),sk,s*.28,0,0,h);P(S_(.075,14,10),0xffffff,s*.11,.03,.26,h).scale.set(1,.7,.5);P(S_(.04,10,8),0x3a2a1a,s*.11,.03,.3,h);P(new G3.BoxGeometry(.13,.02,.03),o.hair,s*.11,.12,.28,h)}
+ P(new G3.ConeGeometry(.04,.12,8),sk,0,-.05,.3,h).rotation.x=.3;P(new G3.BoxGeometry(.12,.025,.03),0x8a4a4a,0,-.15,.27,h);
+ P(new G3.SphereGeometry(.325,28,20,0,Math.PI*2,0,Math.PI*.36),o.hair,0,.02,-.02,h);P(S_(.2),o.hair,0,.3,.1,h).scale.set(1.2,.6,1.2);
+ if(o.face){const f=new THREE.Mesh(new G3.CircleGeometry(.26,24),new THREE.MeshBasicMaterial({map:new THREE.TextureLoader().load(o.face)}));f.position.set(0,0,.305);h.add(f)}
+ const arm=x=>{const g=new THREE.Group();g.position.set(x,1.62,0);r.add(g);P(Cy(.085,.075,.38,12),o.shirt,0,-.2,0,g);P(Cy(.07,.055,.36,12),sk,0,-.55,0,g);P(S_(.075,12,10),sk,0,-.76,0,g);return g};
+ const leg=x=>{const g=new THREE.Group();g.position.set(x,.88,0);r.add(g);P(Cy(.12,.09,.45,14),0x2a3550,0,-.23,0,g);P(Cy(.085,.07,.4,14),0x2a3550,0,-.62,0,g);P(new G3.BoxGeometry(.14,.09,.3),0xf2f2f2,0,-.84,.07,g);return g};
+ u.aL=arm(-.43);u.aR=arm(.43);u.lL=leg(-.14);u.lR=leg(.14);u.tails=[];REAL=0;return r}
+function wolf(){const r=new THREE.Group();part(new G3.BoxGeometry(.9,.8,1.7),0x556677,0,1,0,r);
+ const h=part(new G3.BoxGeometry(.7,.6,.8),0x667788,0,1.45,.95,r);part(new G3.ConeGeometry(.15,.4,4),0x667788,-.25,.5,0,h);part(new G3.ConeGeometry(.15,.4,4),0x667788,.25,.5,0,h);
+ for(const s of[-1,1])part(new G3.SphereGeometry(.08,8,8),0xffee00,s*.2,.1,.4,h);
+ part(new G3.ConeGeometry(.12,.5,4),0x333344,0,0,.5,h).rotation.x=Math.PI/2;
+ for(const x of[-.3,.3])for(const z of[-.6,.6])part(new G3.CylinderGeometry(.1,.08,.8,6),0x445566,x,.4,z,r);
+ part(new G3.ConeGeometry(.15,.9,6),0x445566,0,1.2,-1.1,r).rotation.x=-1.9;r.userData={};return r}
+function oni(){const r=new THREE.Group();part(new G3.SphereGeometry(.9,16,12),0xcc2233,0,1.3,0,r);
+ const h=part(new G3.SphereGeometry(.5,16,12),0xdd3344,0,2.4,0,r);
+ for(const s of[-1,1]){part(new G3.ConeGeometry(.12,.5,6),0xffffcc,s*.3,.5,0,h);part(new G3.SphereGeometry(.12,8,8),0xffee00,s*.2,.08,.42,h)}
+ part(new G3.BoxGeometry(.5,.12,.1),0xffffff,0,-.2,.46,h);
+ r.userData={aL:limb(r,-1,1.8,0xcc2233,1),aR:limb(r,1,1.8,0xcc2233,1)};r.scale.setScalar(1.1);return r}
+const ground=new THREE.Mesh(new G3.CircleGeometry(9,32),toon(0x333355));ground.rotation.x=-Math.PI/2;sc.add(ground);
+const hero=new THREE.Group();sc.add(hero);let heroM,enemyM,aura;
+// Arena scenery per level (L.a): add a new branch to make a new arena type.
+// Real attacks become anime energy attacks; blast size follows how hard you really move.
+const FX=[];
+function shoot(kind){sfx(kind=='special'?'special':kind=='kick'?'kick':'whoosh');const col=HEROES[S.hero].band,big=kind=='special'?1.2:.3+clamp(T.sig.en,0,1.5)*.25;
+ const m=new THREE.Mesh(kind=='kick'?new G3.TorusGeometry(big+.3,.08,6,16,Math.PI):new G3.SphereGeometry(big,12,8),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.85}));
+ m.position.set(hero.position.x,kind=='kick'?1:1.8,hero.position.z-.6);m.userData={t:0,tz:G.mode=='train'?-6:-1.6};sc.add(m);FX.push(m)}
+const arena=new THREE.Group();sc.add(arena);
+function setArena(k){arena.clear();const add=(g,c,x,y,z)=>part(g,c,x,y,z,arena);
+ for(let i=0;i<14;i++){const a=i/14*Math.PI*2+.2,x=Math.cos(a)*10,z=Math.sin(a)*10-2;
+  if(k=='jungle'){add(new G3.CylinderGeometry(.3,.4,5,8),0x5a3a1a,x,2.5,z);add(new G3.SphereGeometry(1.8,8,6),0x1f8a35,x,5.3,z)}
+  else if(k=='street'){const h=3+i%4*2;add(new G3.BoxGeometry(2.5,h,2.5),0x3a3a5a,x,h/2,z)}
+  else if(k=='dojo'){add(new G3.CylinderGeometry(.35,.35,4,8),0xaa2222,x,2,z)}
+  else if(k=='arena'){add(new G3.CylinderGeometry(.6,.6,5,12),0xcccccc,x,2.5,z)}else if(k=='roof'){const h=1.5+i%3;add(new G3.BoxGeometry(2,h,2),0x4a5a7a,x,h/2,z)}else if(k=='tower'){add(new G3.ConeGeometry(.6,5+i%3*2,5),0x8a3aff,x,2.5,z)}
+  else{add(new G3.ConeGeometry(.7,3+i%3*2,6),0xff4400,x,1.5,z)}}
+ ground.material.color.set({jungle:0x2c5a2c,street:0x3a3a4a,dojo:0x6a4a2a,hell:0x3a1010,arena:0x555566,roof:0x2a3040,tower:0x2a1a44}[k]||0x333355);
+ sc.fog=new THREE.Fog(sc.background.getHex(),12,28)}
+function buildHero(){hero.clear();const h=HEROES[S.hero];heroM=(S.real?realHuman:human)(Object.assign(heroCols(),{face:S.face}));heroM.rotation.y=Math.PI+.5;hero.add(heroM);hero.position.set(0,0,2.5)}
+function resize(){R.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.position.set(1.8,2.6,cam.aspect<1?10:7.5);cam.lookAt(0,1.4,-1);cam.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+function pop(txt,pos,col){const v=pos.clone().project(cam),d=document.createElement('div');d.className='pop';d.textContent=txt;if(col)d.style.color=col;
+ d.style.left=((v.x*.5+.5)*innerWidth-20)+'px';d.style.top=((-v.y*.5+.5)*innerHeight)+'px';document.body.appendChild(d);setTimeout(()=>d.remove(),900)}
+
+/* ---------- TRACKING: MediaPipe pose if it loads, else frame-difference motion fallback ---------- */
+const v=$('#v'),T={cam:false,face:'user',pose:null,sig:{cx:.5,cy:.5,en:0,wr:0,an:0,blk:0,ok:1},bx:.5,by:.5,pl:null,pf:null,tn:0,dn:0,hi:0,tr:0,tp:0,still:0,stream:null};
+const cv=document.createElement('canvas');cv.width=40;cv.height=30;const cx2=cv.getContext('2d',{willReadFrequently:true});
+async function startCam(){try{T.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:T.face,width:320,height:240},audio:false}).catch(e=>{if(e&&e.name=='NotAllowedError')throw e;return navigator.mediaDevices.getUserMedia({video:true,audio:false})});v.srcObject=T.stream;await v.play();T.cam=true;v.classList.remove('hidden');v.style.transform=T.face=='user'?'scaleX(-1)':'none';loadPose()}catch(e){T.cam=false;T.err=(e&&e.name)||'Error';v.classList.add('hidden')}}
+function stopCam(){T.stream&&T.stream.getTracks().forEach(t=>t.stop());T.cam=false;v.classList.add('hidden')}
+async function flipCam(){T.face=T.face=='user'?'environment':'user';stopCam();await startCam();$('#sim').classList.toggle('hidden',G.want!='sim')}
+async function loadPose(){if(T.pose)return;try{const B='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14',m=await import(B+'/vision_bundle.mjs'),f=await m.FilesetResolver.forVisionTasks(B+'/wasm');
+ const mk=d=>m.PoseLandmarker.createFromOptions(f,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',delegate:d},runningMode:'VIDEO',numPoses:1});T.pose=await mk('GPU').catch(()=>mk('CPU'))}catch(e){T.pose=null}}
+// Produce one normalized signal {cx,cy,en,wr,an,blk,ok} from either source.
+function sense(now){const s=T.sig;if(!T.cam||v.readyState<2)return;
+ if(T.pose){try{const L=T.pose.detectForVideo(v,now).landmarks[0];if(L){
+   const sp=i=>T.pl?Math.hypot(L[i].x-T.pl[i].x,L[i].y-T.pl[i].y):0,sh=(L[11].y+L[12].y)/2,hp=(L[23].y+L[24].y)/2;
+   s.wr=(sp(15)+sp(16))*12;s.an=(sp(27)+sp(28))*12;s.en=s.wr+s.an;s.cx=(L[11].x+L[12].x+L[23].x+L[24].x)/4;s.cy=(sh+hp)/2;
+   s.blk=L[15].y<L[0].y&&L[16].y<L[0].y?1:0;
+   s.ok=(L[11].visibility>.5&&L[24].visibility>.4&&L[0].y>.02&&L[11].x>.02&&L[12].x<.98&&Math.abs(sh-hp)<.4)?1:(Math.abs(sh-hp)>=.4?2:0);
+   T.pl=L;return}}catch(e){}s.ok=0;return}
+ cx2.drawImage(v,0,0,40,30);const d=cx2.getImageData(0,0,40,30).data;let n=0,sx=0,sy=0;const g=new Float32Array(1200);
+ for(let i=0;i<1200;i++){g[i]=d[i*4]+d[i*4+1]+d[i*4+2];if(T.pf){const df=Math.abs(g[i]-T.pf[i]);if(df>45){n++;sx+=i%40;sy+=(i/40|0)}}}
+ if(n>500)n=0;  // whole picture changed (exposure or phone moved): ignore
+ T.pf=g;s.en=n/1200*14;s.wr=s.en;s.an=0;s.blk=0;s.ok=1;if(n>8){s.cx+=((sx/n/40)-s.cx)*.5;s.cy+=((sy/n/30)-s.cy)*.5}}
+// Turn the signal into game events.
+function derive(dt,now){const s=T.sig,ex=G.mode=='train'?EX[G.ex]:null;
+ if(s.ok==1){T.still=s.en<.05?T.still+dt:0}
+ const dx=s.cx-T.bx,dy=s.cy-T.by;
+ if(!T.dn){T.bx+=dx*.03;T.by+=dy*.03}
+ if(G.mode=='train'&&ex.kind=='y'){if(!T.dn&&dy>.06)T.dn=1;else if(T.dn&&dy<.02){T.dn=0;Bus.emit('rep')}}
+ if(G.mode=='train'&&ex.kind=='h'){if(s.ok==1&&s.en<.3&&T.cam){T.tr2=(T.tr2||0)+dt;if(T.tr2>=5){T.tr2=0;Bus.emit('rep')}}else T.tr2=0}  // plank: 5 s hold = 1 rep
+ if(G.mode=='train'&&ex.kind=='e'){if(s.en>.5&&!T.hi&&now-T.tr>350){T.hi=1;T.tr=now;Bus.emit('rep')}if(s.en<.25||now-T.tr>700)T.hi=0}
+ if(G.mode=='fight'||G.mode=='learn'||(G.mode=='train'&&'pdk'.includes(ex.kind))){
+  if((Math.abs(dx)>.13||dy>.12)&&now-T.tp>800&&(G.mode!='train'||ex.kind=='d')){T.tp=now;Bus.emit('dodge');T.bx=s.cx;T.by=s.cy}
+  else if(s.en>1.3&&F.sp>=100&&now-T.tr>300){T.tr=now;Bus.emit('special')}  // big full-body burst = special
+  else if(s.en>.45&&!T.hi&&now-T.tr>300){T.hi=1;T.tr=now;Bus.emit(s.an>s.wr&&T.pose?'kick':'punch')}
+  if(s.en<.25||now-T.tr>600)T.hi=0;
+  if(s.blk){Bus.emit('block');T.bt=(T.bt||0)+dt;if(T.bt>1.2&&F.sp>=100){T.bt=0;Bus.emit('special')}}else T.bt=0}}  // hold guard 1.2s = special
+
+/* ---------- GAME STATE ---------- */
+const G={mode:'hub',paused:0,reason:'',active:0,ex:0,reps:0,lvl:0};
+const F={hp:100,st:100,sp:0,dodgeT:0,blockT:0,pa:0,hand:0,shake:0,prof:{punch:0,dodge:0,idle:0}};let E=null;
+function show(h){const s=$('#scr');s.innerHTML=h;s.style.background='';s.scrollTop=0;s.classList.remove('hidden')}const hide=()=>$('#scr').classList.add('hidden');
+function addXP(x){S.xp+=x;let up=0;while(S.xp>=S.lv*100){S.xp-=S.lv*100;S.lv++;up=1}if(up){banner('LEVEL UP! Lv '+S.lv);sfx('level')}save()}
+function banner(t){$('#info').textContent=t;setTimeout(()=>$('#info').textContent='',1800)}
+function streak(){const d=new Date().toDateString();if(S.last!=d){S.streak=(new Date(Date.now()-864e5).toDateString()==S.last)?S.streak+1:1;S.last=d;save()}}
+
+function safety(){G.mode='hub';show(`<h1>⚠ SAFETY CHECK</h1><div style="text-align:left;max-width:420px;margin:auto;font-size:18px;line-height:1.6">
+<p>✔ Clear a 2 m × 2 m space around you.<br>✔ Wear shoes.<br>✔ Warm up first.<br>✔ Move in the air only – never hit anything or anyone.<br>✔ Stop if you feel pain or dizziness.</p><p style="font-size:14px;opacity:.85">Not medical advice. Check with a doctor first if you have a health condition, injury or are pregnant. Contains flashing effects. Your camera video is processed on this device only and is never recorded or uploaded.</p></div>
+<p style="font-size:14px;opacity:.85">The app will now ask for camera access and automatically scan your area. By continuing you confirm you are 13 or older and accept the Terms and Privacy Policy.</p><div class="g" style="max-width:420px;margin:auto 0"><button onclick="legal('privacy')">Privacy Policy</button><button onclick="legal('terms')">Terms</button></div><br>
+<div class="g" style="max-width:420px;margin:auto"><button class="go" onclick="scan()">📷 Start now (<span id="cd">5</span>)</button></div>`)}
+function hub(){G.mode='hub';G.paused=0;stopCam();$('#hud').classList.add('hidden');enemyM&&sc.remove(enemyM);E=null;buildHero();resize();arena.clear();sc.fog=null;$('#hud').style.boxShadow='none';ground.material.color.set(0x333355);sc.background=new THREE.Color(0x0b0b16);setArena('dojo');
+ const up=(k,n,d)=>`<button onclick="buy('${k}')">${n} Lv${S.sk[k]||0}<small>${d} · 🪙${30*((S.sk[k]||0)+1)}</small></button>`;
+ show(`<h1>REAL BODY FIGHTER</h1><p>${TITLES[Math.min(5,S.wins/5|0)]} · Lv ${S.lv} · ${S.wins} wins · XP ${S.xp|0}/${S.lv*100} · 🪙${S.coins} · 🔥${S.streak} day streak</p><p><small>Body controls only: punch to attack · lean or duck to dodge · hands up to guard · hold guard 1 s with a full yellow bar for your special.</small></p>
+ <h3>Hero · special: ${HEROES[S.hero].sp}</h3><div class="g">${HEROES.map((h,i)=>`<button class="${i==S.hero?'on':''}" onclick="S.hero=${i};save();hub()">${h.n}</button>`).join('')}</div>
+ ${G.want=='touch'?'<p><small>Touch mode: tap = punch · double tap = kick · swipe sideways or down = dodge · swipe up = special · hold = guard</small></p>':''}<p><button onclick="scan()">📷 Try the camera again</button></p><p><button onclick="custom()">🎨 Customize hero · face photo</button></p><h3>Step 1 · Learn</h3><button class="go" onclick="learn()">🎓 Reflex &amp; Dodge Training${S.tut?' ✔':''}</button><h3>Training Ground</h3><div class="g">${EX.map((e,i)=>`<button onclick="train(${i})">${e.n}<small>+${e.stat}</small></button>`).join('')}</div>
+ <h3>Fight Map ${S.tut?'':'🔒 finish Learn first'}</h3>${S.tut?'':'<p><button onclick="S.tut=1;save();hub()">Skip training</button></p>'}<p><button onclick="S.cleared=29;S.tut=1;save();hub()">🔓 Unlock all 30 levels</button></p><div class="g">${LEVELS.map((l,i)=>`<button ${i>S.cleared||!S.tut?'disabled':''} onclick="fight(${i})">${i+1}. ${l.n}<small>${ENEMIES[l.e].n}${S.adapt[i]?' · adapted x'+S.adapt[i]:''}</small></button>`).join('')}</div>
+ <h3>Skill Upgrades</h3><div class="g">${up('power','Punch Power','+dmg')}${up('dodge','Dodge Window','+time')}${up('regen','Stamina Regen','+regen')}${up('special','Special Charge','+meter')}${up('guard','Iron Guard','-block dmg')}${up('heal','Auto Heal','+heal')}${up('combo','Combo Boost','+chain dmg')}</div>
+ <h3>Stats</h3><p>${Object.entries(S.stats).map(([k,x])=>k+' '+(x|0)).join(' · ')}</p><h3>Enemy Skills</h3><p>Feint ${S.es.feint} · Counter ${S.es.counter} · Speed ${S.es.speed|0} · Rage ${S.es.rage} · AI favors ${favAtk()}</p><h3>Privacy</h3><div class="g"><button onclick="legal('privacy')">Privacy</button><button onclick="legal('terms')">Terms</button><button onclick="wipe()">Delete my data</button></div>`)}
+// Hero editor: recolor hair/shirt/headband/skin, or use a gallery/camera photo as the face.
+const hx=n=>'#'+n.toString(16).padStart(6,'0');
+function heroCols(){const h=HEROES[S.hero];return Object.assign({hair:h.hair,shirt:h.shirt,band:h.band,skin:0xf1c27d},OUTFITS[S.out||0].o,S.cust[S.hero]||{})}
+function setC(k,val){(S.cust[S.hero]??={})[k]=parseInt(val.slice(1),16);save();buildHero()}
+function facePhoto(f){if(!f)return;const im=new Image();im.onload=()=>{const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d'),s=Math.min(im.width,im.height);x.drawImage(im,(im.width-s)/2,(im.height-s)/2,s,s,0,0,128,128);S.face=c.toDataURL('image/jpeg',.8);save();buildHero()};im.src=URL.createObjectURL(f)}
+function custom(){const c=heroCols();cam.position.set(1.8,2.4,6.5);cam.lookAt(0,1.7,2.5);
+ const row=(k,t)=>`<label style="margin:4px 0">${t}<input type="color" value="${hx(c[k])}" onchange="setC('${k}',this.value)" style="width:64px;height:44px"></label>`;
+ show(`<div style="height:38vh"></div><h3>Customize ${HEROES[S.hero].n}</h3>${row('hair','Hair')}${row('shirt','Outfit')}${row('band','Headband')}${row('skin','Skin')}<div class="g" style="max-width:420px;margin:6px auto"><button class="${S.real?'':'on'}" onclick="setStyle(0)">Anime</button><button class="${S.real?'on':''}" onclick="setStyle(1)">Realistic 3D</button></div><div class="g" style="max-width:420px;margin:6px auto">${OUTFITS.map((o,i)=>`<button class="${S.out==i?'on':''}" onclick="outfit(${i})">${o.n}<small>${S.own.includes(i)?'owned':'🪙'+o.c}</small></button>`).join('')}</div><label style="margin:4px 0">📷 Face photo (gallery or camera)<input type="file" accept="image/*" onchange="facePhoto(this.files[0])"></label><div class="g" style="max-width:420px;margin:auto"><button onclick="S.face='';save();buildHero()">Remove photo</button><button class="go" onclick="hub()">Done</button></div>`);
+ $('#scr').style.background='linear-gradient(transparent 36%,#080814f2 36%)'}
+// Area scan: checks light level and (with pose tracking) that your whole body fits, then the background becomes the dojo arena.
+async function scan(){G.want='cam';show('<h2>Starting camera…</h2>');await startCam();
+ if(!T.cam){show('<h1>Camera blocked</h1><p>'+(window.top!==window?'This page is inside a preview frame, which blocks the camera. Tap Open full screen. ':'')+(T.err=='NotAllowedError'?'Permission was denied. Tap the lock icon in the address bar, open Permissions, set Camera to Allow, then retry.':T.err=='NotFoundError'?'No camera was found on this device.':'The camera cannot start here. If you opened this inside another app or a preview window, open the link in Chrome, or host the file on your own https site such as Netlify.')+'</p><small>Error code: '+(T.err||'none')+'</small><br><button class="go" onclick="openFull()">🔓 Open full screen (camera works there)</button><button class="go" onclick="scan()">Retry</button><button onclick="touchMode()">👆 Play with touch (no camera)</button>');return}
+ v.style.cssText='position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;opacity:1;transform:'+(T.face=='user'?'scaleX(-1)':'none');
+ const grad='linear-gradient(#080814ee,#08081400 60%)';
+ show('<h2>🔍 Scanning your area…</h2><p>Hold steady. Show the floor around you, then stand back so your whole body fits.</p><div class="bar"><i id="sb" style="width:0"></i></div>');$('#scr').style.background=grad;
+ let n=0,dark=0,body=0;const iv=setInterval(()=>{cx2.drawImage(v,0,0,40,30);const d=cx2.getImageData(0,0,40,30).data;let b=0;for(let i=0;i<d.length;i+=4)b+=(d[i]+d[i+1]+d[i+2])/3;b/=1200;if(b<45||b>240)dark++;
+  if(T.pose){try{const L=T.pose.detectForVideo(v,performance.now()).landmarks[0];if(L&&L[27].visibility>.4&&L[28].visibility>.4&&L[0].y>.02&&L[27].y<.99)body++}catch(e){}}
+  n++;const sb=$('#sb');sb&&(sb.style.width=n/40*100+'%');
+  if(n>=40){clearInterval(iv);const lit=dark<10,fit=!T.pose||body>8;
+   if(lit&&fit)show('<h1>✔ AREA LOOKS SAFE</h1><p>Lighting is good'+(T.pose?' and your whole body fits in view':'')+'. Switching the background to the training dojo.</p><button class="go" onclick="scanDone()">Continue</button>');
+   else show('<h1>⚠ NOT SAFE YET</h1><p>'+(lit?'':'Too dark or too bright: fix the lighting. ')+(fit?'':'Step back so your whole body, head to feet, is visible. ')+'</p><button class="go" onclick="scan()">Scan again</button>');
+   $('#scr').style.background=grad}},150)}
+function scanDone(){v.style.cssText='';hub()}
+/* ---------- LEGAL, PRIVACY AND ACCESSIBILITY ---------- */
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;  // reduced motion: no screen shake or flashing aura
+const LEGAL={privacy:`<h2>Privacy Policy</h2><p><b>Short version:</b> Real Body Fighter collects no personal data. It has no accounts, ads or analytics.</p><p><b>Camera.</b> Video is analysed on your device to detect movement. It is never recorded, stored or uploaded.</p><p><b>Saved on your device only.</b> Progress, settings and the optional face photo you choose are kept in your browser or app storage. Use Delete my data on the main screen to erase them.</p><p><b>Third parties.</b> The game loads code libraries (cdnjs, jsDelivr) and a pose model (Google) that may see your IP address when they load.</p><p><b>Children.</b> Not intended for children under 13.</p><p><b>Contact.</b> [your email]</p>`,terms:`<h2>Terms of Use</h2><p>Real Body Fighter is a game with exercise movements. It is not medical advice. Check with a doctor before exercising if you have a health condition, injury or are pregnant.</p><p>Clear a safe 2 m by 2 m space, wear shoes, warm up, move in the air only and stop if you feel pain or dizziness. You use the game at your own risk and are responsible for your surroundings.</p><p>The game is provided as is, without warranties, and may change at any time. You must be 13 or older, or have permission from a parent or guardian.</p><p>Contact: [your email]</p>`};
+function legal(k){show(LEGAL[k]+'<button class="go" onclick="'+(G.want?'hub()':'safety()')+'">Back</button>')}
+// Starts the camera request and area scan automatically after 5 s (or tap Start now).
+function autoStart(){let n=5;const iv=setInterval(()=>{const e=$('#cd');if(!e||G.want){clearInterval(iv);return}n--;e.textContent=n;if(n<=0){clearInterval(iv);scan()}},1000)}
+function setStyle(x){S.real=x;save();buildHero();custom()}
+function openFull(){window.open(location.href,'_blank')}
+function touchMode(){G.want='touch';stopCam();v.style.cssText='';hub()}
+// Touch controls when the camera is unavailable: tap = punch, double tap = kick, swipe sideways or down = dodge, swipe up = special, hold = guard.
+(()=>{const c=$('#c');let d=null,lt=0,hold;
+ c.addEventListener('pointerdown',e=>{if(G.want!='touch'||G.paused)return;d={x:e.clientX,y:e.clientY,t:performance.now()};clearInterval(hold);hold=setInterval(()=>{if(d&&performance.now()-d.t>350)Bus.emit('block')},150)});
+ c.addEventListener('pointerup',e=>{clearInterval(hold);if(!d||G.want!='touch')return;const dx=e.clientX-d.x,dy=e.clientY-d.y,dt=performance.now()-d.t;d=null;
+  if(Math.abs(dx)>50||dy>50)Bus.emit('dodge');else if(dy<-50)Bus.emit('special');else if(dt<350){const n=performance.now();if(G.mode=='train'&&'yeh'.includes(EX[G.ex].kind))Bus.emit('rep');else Bus.emit(n-lt<300?'kick':'punch');lt=n}})})();
+function outfit(i){const o=OUTFITS[i];if(!S.own.includes(i)){if(S.coins<o.c){beep(150,.2);return}S.coins-=o.c;S.own.push(i)}S.out=i;save();buildHero();custom()}
+function wipe(){if(confirm('Delete all saved progress and your face photo from this device?')){try{localStorage.removeItem('rbf')}catch(e){}location.reload()}}
+function buy(k){S.sk[k]=S.sk[k]||0;const c=30*(S.sk[k]+1);if(S.coins>=c){S.coins-=c;S.sk[k]++;save();beep(660,.2)}hub()}
+
+/* ---------- PLAY START / STOP / PAUSE ---------- */
+async function begin(mode){G.mode=mode;G.paused=0;G.reps=0;G.active=0;T.tn=0;T.dn=0;hide();$('#hud').classList.remove('hidden');
+ if(G.want=='cam'&&!T.cam)await startCam();$('#sim').classList.toggle('hidden',G.want!='sim');if(G.want=='cam'&&!T.cam)pause('Camera unavailable. Allow camera access and try again.');T.pl=null;T.pf=null;streak()}
+function train(i){G.ex=i;F.sp=0;E&&(sc.remove(enemyM),E=null);$('#eb').classList.add('hidden');begin('train').then(()=>setInfo())}
+function setInfo(){$('#info').textContent=G.mode=='train'?EX[G.ex].n+': '+(EX[G.ex].kind=='h'?G.reps*5+' s':G.reps):''}
+function pause(r,auto){if(G.paused)return;G.paused=1;G.reason=auto?'auto':'';$('#warn').classList.add('hidden');
+ show(`<h1>⏸ PAUSED</h1><p style="font-size:20px">${r}</p>${auto?'':'<button class="go" onclick="resume()">Resume</button>'}<br><br><button onclick="stopPlay()">■ Stop</button>`)}
+function resume(){G.paused=0;hide()}
+function stopPlay(){const w=G.mode;G.paused=1;G.mode='hub';stopCam();$('#hud').classList.add('hidden');let t=20;
+ show(`<h1>COOL-DOWN</h1><p style="font-size:18px">Walk slowly, breathe deep. Stretch quads, hamstrings, shoulders and chest. Drink water.</p><h2 id="ct">${t}</h2><button id="cd" disabled onclick="hub()">Done</button>`);
+ const iv=setInterval(()=>{t--;const e=$('#ct');if(!e||t<0){clearInterval(iv);$('#cd')&&($('#cd').disabled=false);return}e.textContent=t},1000)}
+
+/* ---------- TRAINING ---------- */
+Bus.on('rep',()=>{if(G.mode!='train'||G.paused||'pdk'.includes(EX[G.ex].kind))return;doRep()});
+Bus.on('punch',()=>{if(G.mode=='train'&&!G.paused){const k=EX[G.ex].kind;if(k=='p'||(k=='k'&&!T.pose))doRep();F.pa=.25;F.hand^=1;shoot('punch')}});
+Bus.on('kick',()=>{if(G.mode=='train'&&!G.paused&&EX[G.ex].kind=='k'){doRep();F.kk=.3;shoot('kick')}});
+Bus.on('dodge',()=>{if(G.mode=='train'&&!G.paused&&EX[G.ex].kind=='d')doRep()});
+function doRep(){G.reps++;S.stats[EX[G.ex].stat]+=.1;S.coins++;addXP(5);setInfo();beep(520+G.reps%8*40,.1);F.pa=.25;F.hand^=1;pop('+5 XP',heroM.position.clone().add(new THREE.Vector3(0,2.5,2.5)))}
+
+/* ---------- LEARN: reflex (punch on cue) then dodge drill, 5 each; unlocks fights ---------- */
+const Ln={st:0,ok:0,ph:'wait',t:2,lg:0,lun:0};
+function learn(){enemyM&&sc.remove(enemyM);E=null;enemyM=ENEMIES[0].build();enemyM.position.set(0,0,-2);sc.add(enemyM);setArena('dojo');$('#eb').classList.add('hidden');
+ F.sp=0;Object.assign(Ln,{st:0,ok:0,ph:'wait',t:2.5,lg:0,lun:0});begin('learn').then(()=>banner('Reflex drill: punch when you see the cue!'))}
+function updLearn(dt){const L=Ln,w=$('#warn');L.t-=dt;
+ if(L.ph=='wait'&&L.t<=0){L.ph='cue';L.t=L.st?1.1:1.6;w.textContent=L.st?'⚠ DODGE!':'👊 PUNCH!';w.style.color=L.st?'#f33':'#3f6';w.classList.remove('hidden');if(L.st)L.lg=.9;beep(700,.1)}
+ else if(L.ph=='cue'&&L.t<=0){w.classList.add('hidden');L.ph='wait';L.t=1.2+rnd()*1.5;banner('Too slow, again!')}
+ if(L.lg>0){L.lg-=dt;if(L.lg<=0)L.lun=.25}
+ if(L.lun>0){L.lun-=dt;enemyM.position.z=-2+Math.sin(L.lun/.25*Math.PI)*1.8}else enemyM.position.z=-2}
+function learnHit(k){if(G.mode!='learn'||G.paused)return;
+ if(k=='punch'){F.pa=.25;F.hand^=1;shoot('punch')}else{F.dodgeT=.7;F.dd=rnd()<.5?-1:1}
+ if(Ln.ph!='cue'||(Ln.st?'dodge':'punch')!=k)return;
+ Ln.ok++;S.stats[Ln.st?'Agility':'Speed']+=.15;addXP(4);beep(1000,.1);$('#warn').classList.add('hidden');Ln.ph='wait';Ln.t=1+rnd()*1.5;banner((Ln.st?'Dodge ':'Reflex ')+Ln.ok+'/5');
+ if(Ln.ok>=5){if(!Ln.st){Ln.st=1;Ln.ok=0;Ln.t=2.5;setTimeout(()=>banner('Now the DODGE drill: lean or duck!'),1000)}else learnDone()}}
+function learnDone(){S.tut=1;addXP(30);S.coins+=15;save();G.paused=1;G.mode='hub';stopCam();$('#hud').classList.add('hidden');
+ show('<h1>🎓 TRAINING COMPLETE</h1><p style="font-size:20px">Your reflexes and dodging are ready. Fights are unlocked. Win 5 fights to rank up!</p><button class="go" onclick="hub()">Go to the fight map</button>')}
+['punch','kick','dodge','block','special','rep'].forEach(t=>Bus.on(t,()=>T.last=t));
+Bus.on('punch',()=>learnHit('punch'));Bus.on('kick',()=>learnHit('punch'));Bus.on('dodge',()=>learnHit('dodge'));
+/* ---------- FIGHT ---------- */
+function fight(i){G.lvl=i;const L=LEVELS[i],D=ENEMIES[L.e],a=1+.12*(S.adapt[i]||0);
+ enemyM&&sc.remove(enemyM);enemyM=D.build();enemyM.position.set(0,0,-2);sc.add(enemyM);if(L.boss)enemyM.scale.multiplyScalar(1.3);
+ aura=new THREE.Mesh(new G3.SphereGeometry(1.6,16,12),new THREE.MeshBasicMaterial({color:D.aura,transparent:true,opacity:.18}));aura.position.y=1.3;enemyM.add(aura);
+ E={d:D,hp:D.hp*L.s*a,max:D.hp*L.s*a,pow:D.pow*L.s*a,spd:D.spd*(1+.05*(S.adapt[i]||0))*(1+.05*S.es.speed),state:'idle',t:1.5,atk:null,n:0,block:0,flash:0,fake:0,tier:0,tm:0};
+ Object.assign(F,{hp:100,st:100,sp:0,dodgeT:0,blockT:0});F.prof={punch:0,dodge:0,idle:0};
+ sc.background=new THREE.Color(L.bg);setArena(L.a);$('#eb').classList.remove('hidden');$('#en').textContent=D.n;
+ begin('fight').then(()=>banner('FIGHT!'))}
+function dmgE(d,txt){d*=1+.04*(S.sk.combo||0)*(F.cb||0);E.hp-=d;camK=Math.max(camK,.5);E.flash=.15;const was=F.sp;F.sp=Math.min(100,F.sp+d*(.8+.1*(S.sk.special||0)));if(was<100&&F.sp>=100)banner('SPECIAL READY!');if(!E.rage&&E.hp>0&&E.hp<E.max*.4){E.rage=1;E.pow*=1.3;E.spd*=1.2;banner('ENEMY ENRAGED!')}pop(txt||Math.round(d),enemyM.position.clone().add(new THREE.Vector3(0,3,0)));sfx('hit');if(E.hp<=0)end(1)}
+Bus.on('punch',()=>fightHit(1));Bus.on('kick',()=>fightHit(2));
+function fightHit(k){if(G.mode!='fight'||G.paused||F.pa>.1)return;const nw=performance.now();F.cb=nw-(F.lt||0)<1100?Math.min((F.cb||0)+1,6):0;F.lt=nw;const c=3*k+1;F.pa=.25;F.hand^=1;if(k==2)F.kk=.3;shoot(k==2?'kick':'punch');
+ const weak=F.st<c?.5:1;F.st=Math.max(0,F.st-c);F.prof.punch++;S.stats.Power+=.02;
+ let d=(6+S.sk.power*1.5+S.stats.Power*.3)*k*weak;if(E.block>0){d*=.15;pop('BLOCKED',enemyM.position.clone().add(new THREE.Vector3(0,3,0)),'#9cf')}dmgE(d)}
+Bus.on('dodge',()=>{if(G.mode!='fight'||G.paused)return;F.dodgeT=.7+.15*S.sk.dodge;F.prof.dodge++;F.dd=(rnd()<.5?-1:1);S.stats.Agility+=.05;S.stats.Balance+=.03});
+Bus.on('block',()=>{if(G.mode=='fight')F.blockT=.6});
+Bus.on('special',()=>{if(G.mode!='fight'||G.paused||F.sp<100)return;F.sp=0;banner(HEROES[S.hero].sp+'!');shoot('special');dmgE(30+S.stats.Power,'SPECIAL!');sfx('special');F.shake=.6;camK=1.5});
+// Adaptive AI: picks attacks based on how the player has been fighting.
+function aiPick(){const p=F.prof,r=rnd();
+ if(p.punch>6&&p.punch>p.dodge*2&&r<.4+.08*S.es.counter){E.state='block';E.t=1.1+(E.guard||0);E.block=E.t;return}   // punch spammer -> block + counter
+ if(p.dodge>2&&p.dodge>p.punch*.6){E.fake=r<.35+.08*S.es.feint;E.atk=ATK[r<.6+.05*S.es.feint?'combo':'jab']}        // dodger -> feints and fast combos
+ else{const ks=Object.keys(ATK);let k=ks[0];if(r<.2)k=ks[rnd()*4|0];else ks.forEach(x=>{if((S.ai[x][0]+1)/(S.ai[x][1]+2)>(S.ai[k][0]+1)/(S.ai[k][1]+2))k=x});E.atk=ATK[k]}   // AI: mostly picks the attack that has hurt you most so far, sometimes explores
+ E.n=E.atk.n;E.state='wind';E.t=E.atk.w/E.spd/(E.hp<E.max*.3?1+.1*S.es.rage:1)*(F.prof.idle>3?.8:1);sfx('warn')}
+function strike(){const A=E.atk,rec=S.ai[Object.keys(ATK).find(x=>ATK[x]==A)];rec[1]++;let d=A.d*E.pow;
+ if(F.dodgeT>0){pop('DODGE!',hero.position.clone().add(new THREE.Vector3(0,3,0)),'#3f6');F.sp=Math.min(100,F.sp+8);F.hp=Math.min(100,F.hp+3);addXP(3);S.coins+=1;sfx('dodge')}
+ else{if(F.blockT>0&&A!=ATK.heavy)d*=Math.max(.05,.25-.04*(S.sk.guard||0)),pop('BLOCK',hero.position.clone().add(new THREE.Vector3(0,3,0)),'#9cf');F.hp-=d;rec[0]++;F.nh=0;F.shake=.4;pop(Math.round(d),hero.position.clone().add(new THREE.Vector3(0,2.5,0)),'#f55');sfx('hurt')}
+ E.n--;E.lunge=.25;if(E.n>0){E.state='wind';E.t=.45/E.spd}else{E.state='idle';E.t=(1.4+rnd()*.8)/E.spd;E.n=0}
+ if(F.hp<=0)end(0)}
+function end(win){G.mode='ko';G.paused=1;sfx(win?'win':'lose');const i=G.lvl;
+ // Enemies learn from every fight: they counter what you did most.
+ const p=F.prof,es=S.es;if(p.dodge>p.punch*.6)es.feint++;if(p.punch>6)es.counter++;es.speed=Math.min(8,es.speed+.5);if(win&&i%5==4)es.rage++;save();
+ if(win){S.wins++;const x=40+10*i;addXP(x);S.coins+=20+10*i;S.cleared=Math.max(S.cleared,i+1);S.adapt[i]=(S.adapt[i]||0)+1;S.stats.Strength+=.2;save()}
+ $('#hud').classList.add('hidden');
+ show(`<h1>${win?'K.O.! VICTORY':'GAME OVER'}</h1><p style="font-size:20px">${win?'+XP and coins!'+(S.wins%5==0?' 🏅 RANK UP: '+TITLES[Math.min(5,S.wins/5|0)]+'!':'')+' Your rematch will face a smarter, stronger '+E.d.n+'. Enemy skills: feint '+es.feint+', counter '+es.counter+', speed '+(es.speed|0)+', rage '+es.rage+'. AI now favors '+favAtk()+'.':'Train in the gym and try again. Tip: '+E.d.weak}</p><div class="g" style="max-width:400px;margin:auto"><button class="go" onclick="fight(${i})">Rematch</button>${win&&i<LEVELS.length-1?`<button onclick="fight(${i+1})">Next level</button>`:''}<button onclick="stopPlay()">Finish</button></div>`)}
+
+// Enemies learn mid-fight: every 14 s they gain a skill chosen from how you fight.
+function evolve(){if(E.tier>=4)return;E.tier++;const p=F.prof;let m;
+ if(p.dodge>p.punch){E.spd*=1.12;m='Lightning Reflexes'}else if(p.punch>p.dodge){E.pow*=1.1;E.guard=(E.guard||0)+.3;m='Iron Guard'}else{E.pow*=1.12;m='Fury'}
+ enemyM.scale.x*=1.04;enemyM.scale.z*=1.04;$('#en').textContent=E.d.n+' Tier '+E.tier;banner('ENEMY LEARNED: '+m);beep(300,.4,'sawtooth',.1)}
+/* ---------- MAIN LOOP ---------- */
+let last=0,acc=0,tt=0;
+function frame(t){requestAnimationFrame(frame);const dt=Math.min(.05,(t-last)/1000);last=t;tt+=dt;update(dt,t);R.render(sc,cam)}
+function update(dt,now){const u=heroM.userData,playing=G.mode=='train'||G.mode=='fight'||G.mode=='learn';
+ if(playing&&T.cam){acc+=dt;if(acc>.066){sense(now);if(!G.paused)derive(acc,now);acc=0}
+  const s=T.sig;if(s.ok!=1&&T.pose){if(!G.paused)T.bad=(T.bad||0)+dt;if(T.bad>1)pause(s.ok==2?'You are too close. Step back so your whole body is visible.':'Your body left the frame. Step back into view.',1)}
+  else{T.bad=0;if(G.paused&&G.reason=='auto')resume()}
+  if(!T.pose&&!G.paused&&T.still>8&&!(G.mode=='train'&&EX[G.ex].kind=='h')){T.still=0;pause('No movement detected. Is your whole body in view?')}}
+ if(playing&&!G.paused){G.active+=dt;if(G.active>300){G.active=0;pause('Break time! Drink water and rest for a minute.')}}
+ // hero mirrors body position, punches, dodge
+ const sgn=T.face=='user'?-1:1;let X=T.cam?(T.sig.cx-.5)*sgn*5:0,Y=T.cam?clamp(-(T.sig.cy-T.by)*3,-.8,.2):0;
+ if(F.dodgeT>0){X=F.dd*1.3;F.dodgeT-=dt}
+ hero.position.x+=(clamp(X,-2,2)-hero.position.x)*.2;hero.position.y+=(Y-hero.position.y)*.2;hero.rotation.z=-hero.position.x*.1;
+ F.pa=Math.max(0,F.pa-dt);F.blockT=Math.max(0,F.blockT-dt);const arm=F.hand?u.aR:u.aL,oth=F.hand?u.aL:u.aR;
+ arm.rotation.x=F.pa>0?-Math.PI/2:-.1;oth.rotation.x=F.blockT>0?-2.4:.1;if(F.blockT>0)arm.rotation.x=-2.4;
+ u.tails.forEach((a,i)=>a.rotation.x=Math.sin(tt*8+i)*.3);F.kk=Math.max(0,(F.kk||0)-dt);u.lR.rotation.x=F.kk>0?-1.5:0;
+ // Pose mirroring: your real arms and knees drive the hero's arms and legs live.
+ const PL=T.pl;if(T.cam&&T.pose&&PL&&playing){const sh=(PL[11].y+PL[12].y)/2,hp=(PL[23].y+PL[24].y)/2,tl=Math.max(.1,Math.abs(hp-sh));
+  const ar=(w,a)=>{if(PL[w].visibility>.4&&F.pa<=0&&F.blockT<=0)a.rotation.x=-clamp((sh-PL[w].y)/tl+1,0,2)*Math.PI/2};ar(15,u.aR);ar(16,u.aL);
+  const lg=(k,l)=>{if(PL[k].visibility>.4)l.rotation.x=-clamp((hp+.2-PL[k].y)/.2,0,1)*1.4};if(F.kk<=0)lg(25,u.lR);lg(26,u.lL)}
+ for(let i=FX.length-1;i>=0;i--){const m=FX[i],d=m.userData;d.t+=dt*4;const z0=hero.position.z-.6;m.position.z=z0+(d.tz-z0)*Math.min(1,d.t);m.rotation.z+=dt*10;if(d.t>1.1){sc.remove(m);FX.splice(i,1)}}heroM.position.y=Math.sin(tt*3)*.03;
+ if(G.mode=='fight'&&!G.paused&&E){
+  F.st=Math.min(100,F.st+(8+S.sk.regen*3)*dt);F.nh=(F.nh||0)+dt;if(F.nh>4&&F.hp>0)F.hp=Math.min(100,F.hp+(1.5+S.stats.Stamina*.1+(S.sk.heal||0)*.8)*dt);  // auto heal after 4 s without being hitif(F.pa<=0&&F.dodgeT<=0)F.prof.idle=(F.prof.idle||0)+dt*.3;else F.prof.idle=0;
+  E.block=Math.max(0,E.block-dt);E.flash=Math.max(0,E.flash-dt);E.t-=dt;E.tm+=dt;if(E.tm>14){E.tm=0;evolve()}
+  if(E.state=='idle'&&E.t<=0)aiPick();
+  else if(E.state=='block'&&E.t<=0){E.atk=ATK.jab;E.n=1;E.state='wind';E.t=.5/E.spd}   // counter-attack
+  else if(E.state=='wind'&&E.t<=0){if(E.fake&&E.n==E.atk.n){E.fake=0;E.state='idle';E.t=.3;pop('FEINT',enemyM.position.clone().add(new THREE.Vector3(0,3,0)),'#fa0');aiPick();E.fake=0}else strike()}
+  const w=E.state=='wind';aura.material.color.set(w?0xff0000:E.d.aura);aura.material.opacity=w?.25+(RM?0:Math.sin(tt*30)*.15):.15;
+  $('#warn').classList.toggle('hidden',!w);$('#warn').textContent=w?'! '+E.atk.t:'';
+  if(E.lunge>0){E.lunge-=dt;enemyM.position.z=-2+Math.sin(E.lunge/.25*Math.PI)*1.8}else enemyM.position.z=-2;
+  const eu=enemyM.userData;if(eu.aL)eu.aL.rotation.x=E.lunge>0?-Math.PI/2:Math.sin(tt*4)*.2;
+  enemyM.scale.y=(L_b()+(w?-.08:0));enemyM.position.y=Math.abs(Math.sin(tt*4))*.05+(E.flash>0?.1:0);
+  $('#bh').style.width=clamp(F.hp,0,100)+'%';$('#bh').style.background=F.hp<30?'#f33':'';$('#hud').style.boxShadow=F.hp<30?'inset 0 0 90px #f005':'none';$('#bp').style.background=F.sp>=100?'#ff0':'';$('#bs').style.width=F.st+'%';$('#bp').style.width=F.sp+'%';$('#be').style.width=clamp(E.hp/E.max*100,0,100)+'%'}
+ if(G.mode=='learn'&&!G.paused)updLearn(dt);
+ F.shake=Math.max(0,F.shake-dt);camK=Math.max(0,camK-dt*3);const fv=50-(RM?0:camK*6);if(cam.fov!=fv){cam.fov=fv;cam.updateProjectionMatrix()}  // camera zoom punch on hits and specials
+ const tl=T.cam?(T.pose?'📷 Pose':'📷 Motion')+' · move '+T.sig.en.toFixed(1)+' · '+(T.last||'-'):'📷 no camera';const te=$('#trk');if(te.textContent!=tl)te.textContent=tl;
+ cam.position.x=1.8+(F.shake>0&&!RM?(rnd()-.5)*F.shake:0);
+ if(G.mode=='train'){$('#bs').style.width='100%'}}
+const L_b=()=>(LEVELS[G.lvl].boss?1.3:1)*(1+.04*(E?E.tier:0));
+buildHero();safety();autoStart();frame(0);
+// Single-file install support: the manifest and icon are built here, so no extra files are needed.
+try{const c=document.createElement('canvas');c.width=c.height=512;const x=c.getContext('2d');x.fillStyle='#0b0b16';x.fillRect(0,0,512,512);
+ [[200,'#ff3d6e'],[100,'#f2f2fa'],[45,'#0b0b16']].forEach(([r,col])=>{x.fillStyle=col;x.beginPath();x.arc(256,256,r,0,7);x.fill()});
+ const ic=c.toDataURL('image/png'),m=document.createElement('link');m.rel='manifest';
+ m.href=URL.createObjectURL(new Blob([JSON.stringify({name:'Real Body Fighter',short_name:'Body Fighter',start_url:location.href,display:'standalone',background_color:'#0b0b16',theme_color:'#0b0b16',icons:[{src:ic,sizes:'512x512',type:'image/png'},{src:ic,sizes:'512x512',type:'image/png',purpose:'maskable'}]})],{type:'application/manifest+json'}));document.head.appendChild(m)}catch(e){}
+</script></body></html>
